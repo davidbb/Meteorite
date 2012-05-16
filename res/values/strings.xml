@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="hello">Thank you for trying out Meteorite. This simple app uses a Broadcast Receiver to detect when new apps are installed. The app displays a toast with the newly installed apps UAppID.</string>
+    <string name="app_name">Meteorite</string>
+    <string name="contact">Questions? Comments? Please contact dbarrera@ccsl.carleton.ca</string>
+
+</resources>
