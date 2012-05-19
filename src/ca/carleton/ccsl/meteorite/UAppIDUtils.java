@@ -1,124 +1,158 @@
-/**
- * 
- */
 package ca.carleton.ccsl.meteorite;
 
-import java.io.DataInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigInteger;
 import java.security.MessageDigest;
-import java.security.cert.Certificate;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
-import java.util.Collection;
-import java.util.Enumeration;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
-import java.util.zip.ZipEntry;
+import java.security.cert.X509Certificate;
 
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.util.Log;
+
 /**
+ * The UAppIDUtils class provides static utility methods for calculating application UAppID's.
+ * Provided a binary file or a package name this class is capable of creating a UAppID returned
+ * as a string literal.
+ * 
  * @author dbarrera
- *
  */
-public class UAppIDUtils {
-	private static final String TAG = "Meteorite-UAppIDUtils";
+public class UAppIDUtils
+{
+  private static final String TAG                   = UAppIDUtils.class.getCanonicalName();
+  private static final String HASH_ALGO             = "SHA1";
+  private static final String CERT_FORMAT           = "X509";
+  private static final char   SIGNATURE_DELIMINATOR = ' ';
 
-	public static String getUAppID(String pkgName) {
-		Process proc;
-		String apkPath, sha1Print;
-		String temp;
-
-		try {
-			// create process to find package storage location
-			proc = Runtime.getRuntime().exec("pm path " + pkgName);
-			DataInputStream in = new DataInputStream(proc.getInputStream());
-			apkPath = in.readLine().substring(8); // line starts with "package:"
-			Log.v(TAG, "File path:"+apkPath);
-			// ensure package is in /data/app (otherwise is a system app)
-			if (!apkPath.startsWith("/data/app")) {
-				Log.d(TAG, pkgName + " is system app.  Returning...");
-				return null; // package is not uninstallable (system package)
-			}
-		
-			JarFile jarf = new JarFile(apkPath);
-			Enumeration<JarEntry> entries = jarf.entries();
-			String filename = null;
-			while(entries.hasMoreElements()) { //Get the last RSA file in the list
-				temp = entries.nextElement().getName();
-				//Log.v(TAG, temp + ": " + temp.startsWith("META-INF/") + ", " + temp.endsWith(".RSA"));
-				if(temp.startsWith("META-INF/") && temp.endsWith(".RSA")) {
-					Log.v(TAG, "Found RSA file");
-					Log.v(TAG, "RSA file:"+temp);
-					filename = temp;
-				}
-			}
-			Log.v(TAG, filename != null ? filename : "null filename");
-			if(filename == null) return null;
-			/*reading the sha1fingerprint of the cert*/
-			CertificateFactory cf = null;
-			Collection<? extends Certificate> certs = null;
-			ZipEntry zipEntry = jarf.getEntry(filename);
-			InputStream inStream = jarf.getInputStream(zipEntry);
-			cf =  CertificateFactory.getInstance("X.509");
-			certs = cf.generateCertificates(inStream);
-			for(Certificate cert : certs){
-				byte[] encCertInfo = cert.getEncoded();
-				MessageDigest md = MessageDigest.getInstance("SHA1");
-			    md.update(encCertInfo, 0, encCertInfo.length);
-			    byte[] mdbytes = md.digest();
-			    sha1Print = toHexString(mdbytes);
-	            Log.v(TAG, "Cert SHA1 Sum: "+sha1Print);
-			}
-			
-			//missing:calculate the uappid and return it
-            
-			proc.destroy();
-		} catch (Exception e) {
-			Log.d(TAG, "Exception in UAppIDUtils");
-			e.printStackTrace();
-			return null;
-		}
-		String binaryHash = getBinaryHash(apkPath);
-		return binaryHash;
-	}
-	
-	private static String getBinaryHash(String apkPath) {
-		/*This gets the SHA1 sum of the full apk*/
-		String sha1Print=null;
-		try{
-		MessageDigest md = MessageDigest.getInstance("SHA1");
-		FileInputStream fis = new FileInputStream(apkPath);
-	    byte[] dataBytes = new byte[1024];
-	    int nread = 0; 
-	    while ((nread = fis.read(dataBytes)) != -1) {
-	      md.update(dataBytes, 0, nread);
-	    };
-	    byte[] mdbytes = md.digest();
-	    sha1Print = toHexString(mdbytes);
-		//byte[] digest = md.digest(encCertInfo);
-        //sha1Print = toHexString(digest);
-        Log.v(TAG, "APK SHA1 Sum: "+sha1Print);
-		}
-		catch(Exception e){
-			Log.e(TAG, "Exception while calculating hash of the binary at "+apkPath);
-		}
-        return sha1Print;
-	}
-
-	private static String toHexString(byte[] block) {
-        StringBuffer buf = new StringBuffer();
-        int len = block.length;
-        for (int i = 0; i < len; i++)
-            byte2hex(block[i], buf);
-        return buf.toString();
+  /**
+   * Creates a UAppRecord object for a given Android package name.
+   * In the event of error a message will be logged to the error console and
+   * a null value will be returned.
+   * 
+   * @param pkgName the package name of an installed application.
+   * @return a UAppRecord object for the application.
+   */
+  public static UAppRecord getUApp(Context context, String pkgName)
+  {
+    PackageManager  pkgManager = context.getPackageManager();
+    StringBuilder   hashConcat = new StringBuilder();
+    File            apkFile    = null;
+    
+    try
+    {
+      CertificateFactory cf       = CertificateFactory.getInstance(CERT_FORMAT);
+      PackageInfo        pkgInfo  = pkgManager.getPackageInfo(pkgName, PackageManager.GET_SIGNATURES);   
+      Signature[]        sigs     = pkgInfo.signatures;
+      ApplicationInfo    appInfo  = pkgInfo.applicationInfo;
+      
+      apkFile = new File(appInfo.sourceDir);
+      
+      for (Signature sig : sigs)
+      {
+        byte[]          certData = sig.toByteArray();
+        InputStream     input    = new ByteArrayInputStream(certData);
+        X509Certificate certOb   = (X509Certificate) cf.generateCertificate(input);             
+        String          hash     = hashBytes(certOb.getEncoded());
+        
+        Log.v(TAG, "Cert SHA1 Fingerprint: " + hash);
+        hashConcat.append(hash);
+        hashConcat.append(SIGNATURE_DELIMINATOR);
+      }
+    } catch(PackageManager.NameNotFoundException e) {
+      Log.e(TAG, "Unable to find package \""+pkgName +"\"");
+      return null;
+    } catch(CertificateException e) {
+      Log.e(TAG, "Exception attempting to parse x509 certificate(s) for package \""+ pkgName +"\"");
+      return null;
+    } 
+    
+    if(!apkFile.exists() || !apkFile.canRead())
+    {
+      Log.e(TAG, "Unable to read APK file for package \""+ pkgName +
+                 "\" at \""+ apkFile.getAbsolutePath() +"\"");
+      return null;
     }
-	
-	private static void byte2hex(byte b, StringBuffer buf) {
-        char[] hexChars = { '0', '1', '2', '3', '4', '5', '6', '7', '8',
-                            '9', 'A', 'B', 'C', 'D', 'E', 'F' };
-        int high = ((b & 0xf0) >> 4);
-        int low = (b & 0x0f);
-        buf.append(hexChars[high]);
-        buf.append(hexChars[low]);
+    
+    String     uAppIDString = pkgName + SIGNATURE_DELIMINATOR + hashConcat.toString();
+    String     uAppID       = hashBytes(uAppIDString.getBytes());
+    UAppRecord uAppRec      = new UAppRecord(pkgName);
+
+    uAppRec.setApkFile(apkFile);
+    uAppRec.setBinHash(getBinaryHash(apkFile));
+    uAppRec.setUAppID(uAppID);
+   
+    return uAppRec;
+  }
+  
+  /**
+   * Computes a hash of the provided byte array, returning it in hex string format.
+   * @param input an array of bytes to hash.
+   * @return a base 16 string of hexadecimal digits.
+   */
+  private static String hashBytes(byte[] input)
+  {    
+    try
+    {
+      MessageDigest md        = MessageDigest.getInstance(HASH_ALGO);
+      byte[]        hashBytes = md.digest(input);     
+      String        hash      = toHexString(hashBytes);
+      
+      md.reset();
+      return hash;
+    } catch (NoSuchAlgorithmException e) {
+      Log.e(TAG, "Device does not support SHA1 MessageDisgest algorithm");
+      return null;
     }
+  }
+
+  /**
+   * Computes the SHA1 hash of a binary file.
+   * @param apkPath the path to a binary file to hash.
+   * @return the SHA1 hash of the file provided as an argument.
+   */ 
+  private static String getBinaryHash(File apk)
+  {
+    try
+    {
+      //Note: didn't use sha1Hash() here as we're blocking 1024 bytes at a time
+      //into the MessageDigest rather than feeding it a stable byte array
+      MessageDigest md = MessageDigest.getInstance("SHA1");
+      FileInputStream fis = new FileInputStream(apk);
+      
+      byte[] dataBytes = new byte[1024];
+      int nread = 0;
+      
+      while ((nread = fis.read(dataBytes)) != -1)
+        md.update(dataBytes, 0, nread);
+
+      byte[] mdbytes = md.digest();
+      return toHexString(mdbytes);
+    } catch(IOException e) {
+      Log.e(TAG, "Error reading \""+ apk.getAbsolutePath() +"\" to compute SHA1 hash.");
+      return null;
+    } catch (NoSuchAlgorithmException e) {
+      Log.e(TAG, "Device does not support SHA1 MessageDisgest algorithm");
+      return null;
+    }
+  }
+  
+  /**
+   * Computes the base 16 representation of the byte array argument.
+   * @param bytes an array of bytes.
+   * @return the bytes represented as a string of hexadecimal digits.
+   */
+  public static String toHexString(byte[] bytes)
+  {
+    BigInteger bi = new BigInteger(1, bytes);
+    return String.format("%0" + (bytes.length << 1) + "X", bi);
+  }
 }
