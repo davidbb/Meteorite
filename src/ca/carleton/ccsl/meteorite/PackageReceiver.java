@@ -39,7 +39,7 @@ public class PackageReceiver extends BroadcastReceiver
     Log.v(TAG, "Received a package intent for package " + pkgName);
 
     //Calculate the UAppID for the package name we received
-    String uAppID = UAppIDUtils.getUAppID(pkgName);
+    String uAppID = UAppIDUtils.getUAppID(context, pkgName);
     Log.v(TAG, "UAppID: " + uAppID);
 
     // CharSequence text = "New package: "+pkgName+" \nUAppID:ed13a07f1286...0bebe443b846"+"\n(Querying servers...)";
