@@ -37,12 +37,11 @@ public class PackageReceiver extends BroadcastReceiver
       pkgName = pkgName.substring(INTENT_DATA_PREFIX.length());
 
     Log.v(TAG, "Received a package intent for package " + pkgName);
-
-    //Calculate the UAppID for the package name we received
-    String uAppID = UAppIDUtils.getUAppID(context, pkgName);
-    Log.v(TAG, "UAppID: " + uAppID);
-
-    // CharSequence text = "New package: "+pkgName+" \nUAppID:ed13a07f1286...0bebe443b846"+"\n(Querying servers...)";
+    
+    //Build a UAppRecord for the packagename we recieved an intent for.
+    UAppRecord uApp = UAppIDUtils.getUApp(context, pkgName);
+    Log.v(TAG, "UAppID:  " + uApp.getUAppID());
+    Log.v(TAG, "BinHash: " + uApp.getBinHash());
 
     CharSequence text = "New package: " + pkgName;
     Toast toast = Toast.makeText(context.getApplicationContext(), text, TOAST_DURATION);
